@@ -1,0 +1,35 @@
+# ============================================================
+# PeoplePulse AI — Master Requirements File
+# Python 3.11+ recommended
+# Install: pip install -r requirements.txt
+# ============================================================
+
+# ── Core Data Handling ──────────────────────────────────────
+pandas==2.2.2          # DataFrame operations across data gen, ML, Streamlit
+numpy==1.26.4          # Numerical computing, used by pandas/sklearn/causal generators
+faker==24.4.0          # Synthetic name generation for the HR dataset
+
+# ── Machine Learning ─────────────────────────────────────────
+scikit-learn==1.4.2    # Preprocessing (OrdinalEncoder, StandardScaler), Logistic Regression, Random Forest, GridSearchCV, metrics
+xgboost==2.0.3         # Gradient boosting model (production candidate, compared against RF/LogReg)
+shap==0.45.0           # Model explainability — global feature importance + per-employee driver decomposition
+matplotlib==3.8.4      # Required by shap for summary_plot rendering (Agg backend, no display needed)
+
+# ── Web Application (Streamlit SaaS) ─────────────────────────
+streamlit==1.35.0      # Multi-page SaaS application framework
+plotly==5.20.0         # Interactive charts across all 11 dashboard pages
+openpyxl==3.1.2        # Excel export (to_excel_bytes) — .xlsx read/write engine for pandas
+reportlab==4.1.0       # PDF export (to_pdf_bytes) — KPI summaries and detail tables
+
+# ── Database Connectivity (optional — for production DB-backed deployment) ──
+SQLAlchemy==2.0.29     # ORM / connection abstraction layer for Postgres/MySQL/SQL Server
+psycopg2-binary==2.9.9 # PostgreSQL driver
+pymysql==1.1.0         # MySQL driver
+pyodbc==5.1.0          # SQL Server / Azure SQL driver (requires system ODBC driver installed separately)
+
+# ── Testing ───────────────────────────────────────────────────
+pytest==8.1.1          # Test runner for tests/ suite
+pytest-cov==5.0.0      # Coverage reporting for CI pipelines
+
+# ── Utilities ─────────────────────────────────────────────────
+python-dotenv==1.0.1   # Loads .env file for local configuration (DB creds, app settings)

@@ -1,0 +1,26 @@
+-- ============================================================
+-- PEOPLEPULSE AI — SQL SERVER / AZURE SQL SCHEMA
+-- ============================================================
+-- The full, production-grade T-SQL schema (tables, constraints,
+-- indexes, views, stored procedures, triggers) already exists in:
+--
+--     sql/03_sql_library.sql
+--
+-- That file targets SQL Server / Azure SQL syntax natively (it was
+-- the original Phase 4 deliverable). Run it directly:
+--
+--     sqlcmd -S localhost -d PeoplePulseDB -i sql/03_sql_library.sql
+--
+-- This file exists only as a navigation pointer so the sql/ folder
+-- has a consistent <engine>_schema.sql naming convention across all
+-- three supported databases:
+--     sql/postgresql_schema.sql   <- PostgreSQL (primary/recommended)
+--     sql/mysql_schema.sql        <- MySQL 8.0+
+--     sql/mssql_schema.sql        <- this file (see sql/03_sql_library.sql)
+--
+-- After running sql/03_sql_library.sql, also run the bulk load step
+-- documented inside that file's Section 15 ("BULK DATA LOAD FROM CSV")
+-- or use scripts/load_data.py with DB_ENGINE=mssql in your .env.
+-- ============================================================
+
+:r sql/03_sql_library.sql

@@ -1,0 +1,825 @@
+-- ================================================================
+-- PEOPLEPULSE AI — POWER BI DAX MEASURES LIBRARY
+-- Phase 4: Dashboard Build & Analytics
+-- Dataset: 10,000 employees · 24 columns
+-- ================================================================
+-- TABLE REFERENCES (single flat table model from CSV import)
+-- Table name: HR_Data
+-- All measures go in a dedicated "Measures" table
+-- ================================================================
+
+
+-- ================================================================
+-- SECTION 1: CORE HEADCOUNT MEASURES
+-- ================================================================
+
+Total Employees =
+COUNTROWS( HR_Data )
+
+Active Employees =
+CALCULATE(
+    COUNTROWS( HR_Data ),
+    HR_Data[Attrition] = "No"
+)
+
+Attrited Employees =
+CALCULATE(
+    COUNTROWS( HR_Data ),
+    HR_Data[Attrition] = "Yes"
+)
+
+-- FTE-equivalent (Part-time counted as 0.5 - derived from Work_Mode as proxy)
+-- In real model, use fte_value column from Fact_Employee_Snapshot
+Total FTE =
+SUMX(
+    HR_Data,
+    IF( HR_Data[Work_Mode] = "Part-Time", 0.5, 1.0 )
+)
+
+Headcount by Gender - Male =
+CALCULATE( [Total Employees], HR_Data[Gender] = "Male" )
+
+Headcount by Gender - Female =
+CALCULATE( [Total Employees], HR_Data[Gender] = "Female" )
+
+Headcount % Female =
+DIVIDE(
+    CALCULATE( [Total Employees], HR_Data[Gender] = "Female" ),
+    [Total Employees],
+    0
+)
+
+
+-- ================================================================
+-- SECTION 2: ATTRITION MEASURES  (Primary KPI suite)
+-- ================================================================
+
+Attrition Rate =
+DIVIDE( [Attrited Employees], [Total Employees], 0 )
+
+Attrition Rate % =
+FORMAT( [Attrition Rate], "0.0%" )
+
+-- YTD Attrition Rate (works with Date slicer if date table connected)
+Attrition Rate YTD =
+CALCULATE(
+    [Attrition Rate],
+    DATESYTD( DimDate[Date] )
+)
+
+-- Voluntary Attrition (not including "N/A" exit reasons)
+Voluntary Attrition =
+CALCULATE(
+    [Attrited Employees],
+    HR_Data[Exit_Reason] <> "N/A",
+    HR_Data[Exit_Reason] <> ""
+)
+
+Voluntary Attrition Rate =
+DIVIDE( [Voluntary Attrition], [Total Employees], 0 )
+
+-- Regrettable Attrition = high performers who left
+Regrettable Attrition =
+CALCULATE(
+    [Attrited Employees],
+    HR_Data[Performance_Rating] >= 4,
+    HR_Data[Attrition] = "Yes"
+)
+
+Regrettable Attrition Rate =
+DIVIDE( [Regrettable Attrition], [Total Employees], 0 )
+
+-- New Hire Attrition (< 1 year tenure who left)
+New Hire Attrition =
+CALCULATE(
+    [Attrited Employees],
+    HR_Data[Years_At_Company] < 1
+)
+
+New Hire Attrition Rate =
+DIVIDE( [New Hire Attrition],
+    CALCULATE( [Total Employees], HR_Data[Years_At_Company] < 1 ),
+    0
+)
+
+-- Attrition Rate vs Prior Period (requires Date table)
+Attrition Rate PY =
+CALCULATE(
+    [Attrition Rate],
+    SAMEPERIODLASTYEAR( DimDate[Date] )
+)
+
+Attrition Rate Change vs PY =
+[Attrition Rate] - [Attrition Rate PY]
+
+-- Attrition Rate RAG Status for conditional formatting
+Attrition RAG =
+SWITCH(
+    TRUE(),
+    [Attrition Rate] >= 0.25,  "Red",
+    [Attrition Rate] >= 0.18,  "Amber",
+    "Green"
+)
+
+-- Attrition Rate Trend Arrow
+Attrition Trend =
+IF(
+    ISBLANK( [Attrition Rate PY] ),
+    "—",
+    IF( [Attrition Rate] > [Attrition Rate PY], "▲", "▼" )
+)
+
+
+-- ================================================================
+-- SECTION 3: COMPENSATION MEASURES
+-- ================================================================
+
+Avg Salary =
+AVERAGE( HR_Data[Salary] )
+
+Median Salary =
+MEDIAN( HR_Data[Salary] )
+
+Total Salary Cost =
+SUM( HR_Data[Salary] )
+
+Total Bonus Cost =
+SUM( HR_Data[Bonus] )
+
+Total Compensation Cost =
+[Total Salary Cost] + [Total Bonus Cost]
+
+Avg Total Compensation =
+DIVIDE( [Total Compensation Cost], [Total Employees], 0 )
+
+-- Compa Ratio = individual salary vs level median
+-- Computed as a column first, then aggregated
+Avg Compa Ratio =
+AVERAGEX(
+    HR_Data,
+    DIVIDE(
+        HR_Data[Salary],
+        CALCULATE(
+            MEDIAN( HR_Data[Salary] ),
+            ALLEXCEPT( HR_Data, HR_Data[Job_Level] )
+        )
+    )
+)
+
+-- % Employees Below 80% of Level Median (pay equity risk)
+Pct Below Market =
+DIVIDE(
+    COUNTROWS(
+        FILTER(
+            HR_Data,
+            HR_Data[Salary] <
+                CALCULATE(
+                    MEDIAN( HR_Data[Salary] ),
+                    ALLEXCEPT( HR_Data, HR_Data[Job_Level] )
+                ) * 0.80
+        )
+    ),
+    [Total Employees],
+    0
+)
+
+-- Gender Pay Gap % (male avg as baseline)
+Gender Pay Gap % =
+VAR MaleSalary =
+    CALCULATE( AVERAGE( HR_Data[Salary] ), HR_Data[Gender] = "Male" )
+VAR FemaleSalary =
+    CALCULATE( AVERAGE( HR_Data[Salary] ), HR_Data[Gender] = "Female" )
+RETURN
+    DIVIDE( MaleSalary - FemaleSalary, MaleSalary, 0 )
+
+Gender Pay Gap $ =
+    CALCULATE( AVERAGE( HR_Data[Salary] ), HR_Data[Gender] = "Male" )
+    - CALCULATE( AVERAGE( HR_Data[Salary] ), HR_Data[Gender] = "Female" )
+
+Salary Percentile 25 =
+PERCENTILE.INC( HR_Data[Salary], 0.25 )
+
+Salary Percentile 75 =
+PERCENTILE.INC( HR_Data[Salary], 0.75 )
+
+Salary Percentile 90 =
+PERCENTILE.INC( HR_Data[Salary], 0.90 )
+
+Compensation IQR =
+[Salary Percentile 75] - [Salary Percentile 25]
+
+-- Salary vs Prior Period (requires Date table or snapshot)
+Avg Salary Change vs PY =
+[Avg Salary]
+    - CALCULATE( [Avg Salary], SAMEPERIODLASTYEAR( DimDate[Date] ) )
+
+
+-- ================================================================
+-- SECTION 4: ENGAGEMENT & SATISFACTION MEASURES
+-- ================================================================
+
+Avg Engagement Score =
+AVERAGE( HR_Data[Engagement_Score] )
+
+Median Engagement Score =
+MEDIAN( HR_Data[Engagement_Score] )
+
+Avg Satisfaction Score =
+AVERAGE( HR_Data[Satisfaction_Score] )
+
+-- Engagement Index (normalize 0-100 to 0-10 for display)
+Engagement Index =
+ROUND( [Avg Engagement Score] / 10, 1 )
+
+-- Flight Risk Segmentation Counts
+High Flight Risk Employees =
+CALCULATE(
+    [Total Employees],
+    HR_Data[Engagement_Score] < 40
+)
+
+Medium Flight Risk Employees =
+CALCULATE(
+    [Total Employees],
+    HR_Data[Engagement_Score] >= 40,
+    HR_Data[Engagement_Score] < 60
+)
+
+Low Flight Risk Employees =
+CALCULATE(
+    [Total Employees],
+    HR_Data[Engagement_Score] >= 60,
+    HR_Data[Engagement_Score] < 75
+)
+
+Engaged Employees =
+CALCULATE(
+    [Total Employees],
+    HR_Data[Engagement_Score] >= 75
+)
+
+Pct High Flight Risk =
+DIVIDE( [High Flight Risk Employees], [Total Employees], 0 )
+
+-- eNPS Approximation (using Satisfaction Score as proxy)
+-- Promoters = Satisfaction >= 80, Detractors = Satisfaction < 40
+eNPS Score =
+VAR Promoters =
+    CALCULATE( [Total Employees], HR_Data[Satisfaction_Score] >= 80 )
+VAR Detractors =
+    CALCULATE( [Total Employees], HR_Data[Satisfaction_Score] < 40 )
+RETURN
+    ROUND(
+        DIVIDE( Promoters - Detractors, [Total Employees], 0 ) * 100,
+        0
+    )
+
+-- Engagement Change vs Benchmark (company avg as benchmark)
+Engagement vs Company Avg =
+[Avg Engagement Score]
+    - CALCULATE( [Avg Engagement Score], ALL( HR_Data[Department] ) )
+
+Engagement RAG =
+SWITCH(
+    TRUE(),
+    [Avg Engagement Score] >= 75, "Green",
+    [Avg Engagement Score] >= 60, "Amber",
+    "Red"
+)
+
+
+-- ================================================================
+-- SECTION 5: PERFORMANCE MEASURES
+-- ================================================================
+
+Avg Performance Rating =
+AVERAGE( HR_Data[Performance_Rating] )
+
+-- Distribution percentages
+Pct Distinguished =
+DIVIDE(
+    CALCULATE( [Total Employees], HR_Data[Performance_Rating] = 5 ),
+    [Total Employees], 0
+)
+
+Pct Exceeds Expectations =
+DIVIDE(
+    CALCULATE( [Total Employees], HR_Data[Performance_Rating] = 4 ),
+    [Total Employees], 0
+)
+
+Pct Meets Expectations =
+DIVIDE(
+    CALCULATE( [Total Employees], HR_Data[Performance_Rating] = 3 ),
+    [Total Employees], 0
+)
+
+Pct Below Expectations =
+DIVIDE(
+    CALCULATE( [Total Employees], HR_Data[Performance_Rating] = 2 ),
+    [Total Employees], 0
+)
+
+Pct Unacceptable =
+DIVIDE(
+    CALCULATE( [Total Employees], HR_Data[Performance_Rating] = 1 ),
+    [Total Employees], 0
+)
+
+-- High Performers (rating 4 or 5)
+High Performers =
+CALCULATE(
+    [Total Employees],
+    HR_Data[Performance_Rating] >= 4
+)
+
+Pct High Performers =
+DIVIDE( [High Performers], [Total Employees], 0 )
+
+-- Calibration Score — measures how well a manager's team is distributed
+-- Ideal: ≤15% rated below expectations per manager
+Managers Exceeding Below Threshold =
+COUNTROWS(
+    FILTER(
+        VALUES( HR_Data[Manager_ID] ),
+        CALCULATE(
+            DIVIDE(
+                CALCULATE( [Total Employees], HR_Data[Performance_Rating] <= 2 ),
+                [Total Employees],
+                0
+            )
+        ) > 0.15
+    )
+)
+
+-- Performance vs Attrition Correlation Card
+Perf Rating of Attrited Employees =
+CALCULATE(
+    AVERAGE( HR_Data[Performance_Rating] ),
+    HR_Data[Attrition] = "Yes"
+)
+
+Perf Rating of Active Employees =
+CALCULATE(
+    AVERAGE( HR_Data[Performance_Rating] ),
+    HR_Data[Attrition] = "No"
+)
+
+
+-- ================================================================
+-- SECTION 6: ATTENDANCE & LEAVE MEASURES
+-- ================================================================
+
+Avg Attendance Pct =
+AVERAGE( HR_Data[Attendance_Pct] )
+
+Total Leave Days =
+SUM( HR_Data[Leave_Count] )
+
+Avg Leave Days =
+AVERAGE( HR_Data[Leave_Count] )
+
+-- Chronic Absenteeism (attendance < 85%)
+Chronic Absenteeism Count =
+CALCULATE(
+    [Total Employees],
+    HR_Data[Attendance_Pct] < 85
+)
+
+Chronic Absenteeism Rate =
+DIVIDE( [Chronic Absenteeism Count], [Total Employees], 0 )
+
+-- Attendance RAG
+Attendance RAG =
+SWITCH(
+    TRUE(),
+    [Avg Attendance Pct] >= 95, "Green",
+    [Avg Attendance Pct] >= 88, "Amber",
+    "Red"
+)
+
+-- Attendance of At-Risk vs Engaged
+Attendance of High Risk Employees =
+CALCULATE(
+    AVERAGE( HR_Data[Attendance_Pct] ),
+    HR_Data[Engagement_Score] < 40
+)
+
+
+-- ================================================================
+-- SECTION 7: TRAINING & DEVELOPMENT MEASURES
+-- ================================================================
+
+Total Training Hours =
+SUM( HR_Data[Training_Hours] )
+
+Avg Training Hours =
+AVERAGE( HR_Data[Training_Hours] )
+
+Avg Training Hours - Active =
+CALCULATE( [Avg Training Hours], HR_Data[Attrition] = "No" )
+
+Avg Training Hours - Attrited =
+CALCULATE( [Avg Training Hours], HR_Data[Attrition] = "Yes" )
+
+Training Hours Delta (Retained vs Attrited) =
+[Avg Training Hours - Active] - [Avg Training Hours - Attrited]
+
+-- Training Investment
+-- Approx $50/hour for internal + external blended cost
+Training Cost Estimate =
+[Total Training Hours] * 50
+
+Training Hours Percentile 90 =
+PERCENTILE.INC( HR_Data[Training_Hours], 0.90 )
+
+
+-- ================================================================
+-- SECTION 8: TENURE & CAREER MEASURES
+-- ================================================================
+
+Avg Years At Company =
+AVERAGE( HR_Data[Years_At_Company] )
+
+Median Years At Company =
+MEDIAN( HR_Data[Years_At_Company] )
+
+Avg Promotions =
+AVERAGE( HR_Data[Promotions] )
+
+-- Promotion Rate (at least 1 promotion)
+Promoted Employees =
+CALCULATE( [Total Employees], HR_Data[Promotions] >= 1 )
+
+Promotion Rate =
+DIVIDE( [Promoted Employees], [Total Employees], 0 )
+
+-- Promotion Rate of Active vs Attrited
+Promotion Rate - Active =
+CALCULATE( [Promotion Rate], HR_Data[Attrition] = "No" )
+
+Promotion Rate - Attrited =
+CALCULATE( [Promotion Rate], HR_Data[Attrition] = "Yes" )
+
+-- Expected vs Actual Promotions Gap (simplified)
+Avg Promotion Gap =
+AVERAGEX(
+    HR_Data,
+    HR_Data[Years_At_Company] / 2.8 - HR_Data[Promotions]
+)
+
+-- Employees with Promotion Gap > 2 (frustrated high-tenures)
+Employees With Promotion Gap =
+COUNTROWS(
+    FILTER(
+        HR_Data,
+        ( HR_Data[Years_At_Company] / 2.8 ) - HR_Data[Promotions] > 2
+    )
+)
+
+
+-- ================================================================
+-- SECTION 9: TALENT ACQUISITION MEASURES
+-- ================================================================
+
+-- Recruitment Source Volume
+Top Recruitment Source =
+TOPN(
+    1,
+    SUMMARIZE(
+        HR_Data,
+        HR_Data[Recruitment_Source],
+        "Volume", COUNTROWS( HR_Data )
+    ),
+    [Volume], DESC
+)
+
+-- Source Attrition Rate by Source
+Source Attrition Rate =
+DIVIDE(
+    CALCULATE( [Attrited Employees] ),
+    CALCULATE( [Total Employees] ),
+    0
+)
+-- (Use this in a matrix visual with Recruitment_Source on rows)
+
+-- Internal Hire Rate
+Internal Hire Rate =
+DIVIDE(
+    CALCULATE(
+        [Total Employees],
+        HR_Data[Recruitment_Source] = "Internal Transfer"
+    ),
+    [Total Employees],
+    0
+)
+
+-- Referral Hire Rate
+Referral Hire Rate =
+DIVIDE(
+    CALCULATE(
+        [Total Employees],
+        HR_Data[Recruitment_Source] = "Employee Referral"
+    ),
+    [Total Employees],
+    0
+)
+
+-- Referral Attrition Rate
+Referral Attrition Rate =
+CALCULATE(
+    [Attrition Rate],
+    HR_Data[Recruitment_Source] = "Employee Referral"
+)
+
+
+-- ================================================================
+-- SECTION 10: MANAGER EFFECTIVENESS MEASURES
+-- ================================================================
+
+-- Manager Effectiveness Score (composite: team engagement + inverse attrition + promotions)
+-- Used in Manager Scorecard visual
+Manager Effectiveness Score =
+VAR TeamEngagement =
+    CALCULATE( AVERAGE( HR_Data[Engagement_Score] ) )
+VAR TeamAttritionRate =
+    CALCULATE( [Attrition Rate] )
+VAR TeamPromotionRate =
+    CALCULATE( [Promotion Rate] )
+VAR EngComponent     = DIVIDE( TeamEngagement, 100 ) * 40        -- 40% weight
+VAR RetComponent     = ( 1 - TeamAttritionRate ) * 40            -- 40% weight
+VAR PromComponent    = TeamPromotionRate * 20                     -- 20% weight
+RETURN
+    ROUND( ( EngComponent + RetComponent + PromComponent ) * 100, 1 )
+
+-- Team Attrition Rate (for manager row context)
+Team Attrition Rate =
+CALCULATE( [Attrition Rate] )
+
+-- Avg Team Engagement (for manager row context)
+Avg Team Engagement =
+CALCULATE( AVERAGE( HR_Data[Engagement_Score] ) )
+
+-- Span of Control (direct reports per manager)
+Span of Control =
+DIVIDE(
+    CALCULATE( COUNTROWS( HR_Data ), ALL( HR_Data[Manager_ID] ) ),
+    DISTINCTCOUNT( HR_Data[Manager_ID] )
+)
+
+
+-- ================================================================
+-- SECTION 11: ADVANCED / INSIGHT MEASURES
+-- ================================================================
+
+-- Flight Risk Score (Composite of engagement + satisfaction + attendance + tenure risk)
+Flight Risk Score (Composite) =
+AVERAGEX(
+    HR_Data,
+    VAR EngRisk  = DIVIDE( MAX( 0, 60 - HR_Data[Engagement_Score] ), 60 ) * 35
+    VAR SatRisk  = DIVIDE( MAX( 0, 50 - HR_Data[Satisfaction_Score] ), 50 ) * 25
+    VAR AttRisk  = DIVIDE( MAX( 0, 85 - HR_Data[Attendance_Pct] ), 85 ) * 20
+    VAR TenRisk  = IF( HR_Data[Years_At_Company] < 1, 20, IF( HR_Data[Years_At_Company] < 2, 12, 0 ) )
+    RETURN EngRisk + SatRisk + AttRisk + TenRisk
+)
+
+-- Revenue Impact of Attrition (1.5× salary cost to replace)
+Attrition Revenue Impact =
+SUMX(
+    FILTER( HR_Data, HR_Data[Attrition] = "Yes" ),
+    HR_Data[Salary] * 1.5
+)
+
+Attrition Cost Per Employee =
+DIVIDE( [Attrition Revenue Impact], [Attrited Employees], 0 )
+
+-- Workforce Diversity Index (Simpson's D — 1 = max diversity)
+Gender Diversity Index =
+VAR MalePct   = DIVIDE( CALCULATE( [Total Employees], HR_Data[Gender] = "Male" ),    [Total Employees] )
+VAR FemalePct = DIVIDE( CALCULATE( [Total Employees], HR_Data[Gender] = "Female" ),  [Total Employees] )
+VAR NBPct     = DIVIDE( CALCULATE( [Total Employees], HR_Data[Gender] = "Non-binary"  ), [Total Employees] )
+RETURN
+    ROUND( 1 - ( MalePct^2 + FemalePct^2 + NBPct^2 ), 4 )
+
+-- Benchmark comparison (hardcoded industry benchmark)
+Attrition vs Industry Benchmark =
+[Attrition Rate] - 0.18   -- Industry tech benchmark = 18%
+
+Engagement vs Industry Benchmark =
+[Avg Engagement Score] - 65   -- Industry benchmark = 65
+
+-- Predictive Retention Score (likelihood employee stays next 12 months)
+Retention Score =
+AVERAGEX(
+    HR_Data,
+    VAR BaseScore    = 70
+    VAR EngAdj       = ( HR_Data[Engagement_Score] - 67.3 ) * 0.3
+    VAR TenureAdj    = IF( HR_Data[Years_At_Company] > 2, 10, -8 )
+    VAR PerfAdj      = ( HR_Data[Performance_Rating] - 3 ) * 3
+    VAR PromoAdj     = MIN( HR_Data[Promotions], 3 ) * 2
+    RETURN CLAMP( BaseScore + EngAdj + TenureAdj + PerfAdj + PromoAdj, 0, 100 )
+)
+
+
+-- ================================================================
+-- SECTION 12: DYNAMIC TITLE & CONTEXT MEASURES
+-- ================================================================
+
+-- Contextual subtitle for dashboard pages (shows active filter context)
+Selected Department =
+IF(
+    ISFILTERED( HR_Data[Department] ),
+    SELECTEDVALUE( HR_Data[Department], "Multiple Departments" ),
+    "All Departments"
+)
+
+Selected Location =
+IF(
+    ISFILTERED( HR_Data[Location] ),
+    SELECTEDVALUE( HR_Data[Location], "Multiple Locations" ),
+    "All Locations"
+)
+
+Dashboard Subtitle =
+"Showing: " & [Selected Department] & " | " & [Selected Location]
+& " | n = " & FORMAT( [Total Employees], "#,##0" ) & " employees"
+
+-- KPI Card Formatted Values
+Attrition Rate Formatted =
+FORMAT( [Attrition Rate], "0.0%" )
+    & " (" & FORMAT( [Attrited Employees], "#,##0" ) & " employees)"
+
+Avg Salary Formatted =
+"$" & FORMAT( [Avg Salary] / 1000, "#,##0.0" ) & "K avg | "
+& "$" & FORMAT( [Median Salary] / 1000, "#,##0.0" ) & "K median"
+
+Engagement Formatted =
+FORMAT( [Avg Engagement Score], "0.0" ) & "/100 — "
+& SWITCH(
+    [Engagement RAG],
+    "Green", "Healthy",
+    "Amber", "Monitor",
+    "Red",   "Action Required"
+)
+
+
+-- ================================================================
+-- SECTION 13: CALCULATED COLUMNS (add to HR_Data table)
+-- ================================================================
+
+-- Tenure Band (for histogram binning)
+Tenure_Band =
+SWITCH(
+    TRUE(),
+    HR_Data[Years_At_Company] < 1,   "<1 Year",
+    HR_Data[Years_At_Company] < 2,   "1-2 Years",
+    HR_Data[Years_At_Company] < 3,   "2-3 Years",
+    HR_Data[Years_At_Company] < 5,   "3-5 Years",
+    HR_Data[Years_At_Company] < 8,   "5-8 Years",
+    HR_Data[Years_At_Company] < 12,  "8-12 Years",
+    "12+ Years"
+)
+
+-- Age Band
+Age_Band =
+SWITCH(
+    TRUE(),
+    HR_Data[Age] < 25,  "Under 25",
+    HR_Data[Age] < 35,  "25-34",
+    HR_Data[Age] < 45,  "35-44",
+    HR_Data[Age] < 55,  "45-54",
+    HR_Data[Age] < 65,  "55-64",
+    "65+"
+)
+
+-- Salary Band
+Salary_Band =
+SWITCH(
+    TRUE(),
+    HR_Data[Salary] < 80000,   "< $80K",
+    HR_Data[Salary] < 120000,  "$80K-$120K",
+    HR_Data[Salary] < 160000,  "$120K-$160K",
+    HR_Data[Salary] < 200000,  "$160K-$200K",
+    HR_Data[Salary] < 250000,  "$200K-$250K",
+    HR_Data[Salary] < 350000,  "$250K-$350K",
+    "$350K+"
+)
+
+-- Engagement Tier
+Engagement_Tier =
+SWITCH(
+    TRUE(),
+    HR_Data[Engagement_Score] >= 75,  "Engaged",
+    HR_Data[Engagement_Score] >= 60,  "Low Risk",
+    HR_Data[Engagement_Score] >= 40,  "Medium Risk",
+    "High Risk"
+)
+
+-- Attrition Binary (for scatter charts and correlations)
+Attrition_Binary =
+IF( HR_Data[Attrition] = "Yes", 1, 0 )
+
+-- Compa Ratio Column
+Compa_Ratio =
+VAR LevelMedian =
+    CALCULATE(
+        MEDIAN( HR_Data[Salary] ),
+        ALLEXCEPT( HR_Data, HR_Data[Job_Level] )
+    )
+RETURN DIVIDE( HR_Data[Salary], LevelMedian, 1 )
+
+-- Promotion Gap Column
+Promotion_Gap =
+ROUND( HR_Data[Years_At_Company] / 2.8 - HR_Data[Promotions], 1 )
+
+-- Flight Risk Category Column
+Flight_Risk_Category =
+SWITCH(
+    TRUE(),
+    HR_Data[Engagement_Score] < 40,  "🔴 High Risk",
+    HR_Data[Engagement_Score] < 60,  "🟡 Medium Risk",
+    HR_Data[Engagement_Score] < 75,  "🟢 Low Risk",
+    "✅ Engaged"
+)
+
+-- Is Regrettable Exit
+Is_Regrettable_Exit =
+IF(
+    HR_Data[Attrition] = "Yes" && HR_Data[Performance_Rating] >= 4,
+    "Yes", "No"
+)
+
+-- Performance Group (simplified)
+Performance_Group =
+SWITCH(
+    HR_Data[Performance_Rating],
+    5, "High Performer",
+    4, "High Performer",
+    3, "Core Performer",
+    2, "Low Performer",
+    1, "Low Performer"
+)
+
+
+-- ================================================================
+-- SECTION 14: POWER BI REPORT PAGE ARCHITECTURE
+-- ================================================================
+-- Recommended pages and visuals for each dashboard:
+
+-- PAGE 1: Executive Overview
+--   KPI Cards: Total Employees | Attrition Rate | Avg Salary | Avg Engagement
+--   Line chart: Attrition Rate trend by month (if date table connected)
+--   Clustered bar: Headcount by Department + Attrition Rate overlay
+--   Donut: Gender split
+--   Treemap: Headcount by Location
+--   Slicer: Department, Location, Work Mode, Job Level
+
+-- PAGE 2: Attrition Deep Dive
+--   Waterfall: Attrition drivers (by category)
+--   Bar chart: Attrition Rate by Department (sorted desc)
+--   Area chart: Attrition by Tenure Band
+--   Matrix: Attrition Rate by Department × Performance Rating
+--   Bar chart: Exit Reason distribution (filtered to Attrition=Yes)
+--   Scatter: Engagement Score vs Attrition (colored by department)
+
+-- PAGE 3: Compensation & Equity
+--   Box plot or bar: Salary distribution by Job Level (P25/Median/P75)
+--   Bar chart: Median Salary by Department
+--   KPI: Gender Pay Gap % + $
+--   Scatter: Compa Ratio distribution (histogram)
+--   Matrix: Avg Salary by Gender × Job Level (heat colored)
+--   Line: Salary growth by tenure band
+
+-- PAGE 4: Engagement & Flight Risk
+--   KPI: Avg Engagement | eNPS | Pct High Risk | Pct Engaged
+--   Bar: Engagement by Department (colored RAG)
+--   Scatter: Engagement Score vs Satisfaction Score (colored by Flight Risk Tier)
+--   Table: High Risk employees (Engagement < 40) with department/role/manager
+--   Bar: Engagement by Tenure Band (honeymoon curve visible)
+--   Gauge: Overall Engagement vs benchmark (65)
+
+-- PAGE 5: Performance & Talent
+--   Stacked bar: Performance distribution by Department
+--   Bar: Avg Performance Rating by Department
+--   Scatter: Performance Rating vs Salary (by level)
+--   Matrix: Promotion Rate by Department × Performance Rating
+--   KPI: Pct High Performers | Regrettable Attrition Rate
+--   Bar: Training Hours by Job Level
+
+-- PAGE 6: Manager Scorecard
+--   Table: Manager | Team Size | Attrition Rate | Engagement | Performance Avg | Effectiveness Score
+--   Bar: Top 10 / Bottom 10 managers by Effectiveness Score
+--   KPI: Overall Span of Control | Managers with High Attrition Teams
+--   Conditional formatting on all metrics (RAG thresholds)
+
+-- PAGE 7: Workforce Composition
+--   Donut: Gender | Work Mode | Recruitment Source
+--   Bar: Headcount by Location + Region grouping
+--   Stacked bar: Job Level distribution by Department (org pyramid)
+--   Bar: Avg Tenure by Department
+--   Table: Full employee detail with all columns (paginated)
+
+-- ================================================================
+-- END OF DAX MEASURES LIBRARY
+-- PeoplePulse AI | Phase 4 | Power BI Analytics
+-- ================================================================
