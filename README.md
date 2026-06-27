@@ -5,6 +5,7 @@ A complete, runnable HR analytics platform: causally-modeled dataset → SQL
 data warehouse → ML attrition prediction → Power BI architecture → deployed
 Streamlit SaaS application. Clone, install, and run end-to-end.
 
+OPEN WITH: https://enterprise-workforce-intelligence-platform-kqwb6xrttdx7ju47ztk.streamlit.app/
 ---
 
 ## Quick Start (5 Minutes)
